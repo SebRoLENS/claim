@@ -33,6 +33,19 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Patch D8 input for current Build Tools
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          p = 'project/build.sh'
+          s = open(p, encoding='utf-8').read()
+          old = '"$d8" --min-api 23 --output "$build_dir/dex" "$build_dir/classes"'
+          new = '"$d8" --min-api 23 --output "$build_dir/dex" $(find "$build_dir/classes" -type f -name \'*.class\')'
+          if old not in s:
+              raise SystemExit('Expected D8 command not found')
+          open(p, 'w', encoding='utf-8').write(s.replace(old, new))
+          PY
+
       - name: Build aligned unsigned APK
         working-directory: project
         run: ./build.sh
