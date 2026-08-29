@@ -1,0 +1,159 @@
+--- src/it/claimboard/scanner/ClaimAccessibilityService.java
++++ src/it/claimboard/scanner/ClaimAccessibilityService.java
+@@ -36,6 +36,8 @@
+     private long lastProcessedElapsed;
+     private long lastUnassociatedElapsed;
+     private long automationPausedUntil;
++    private String pendingManualLot = "";
++    private long pendingManualLotAt;
+ 
+     private Handler handler;
+     private boolean automationScheduled;
+@@ -62,16 +64,13 @@
+         if (packageName == null || !WHATSAPP_BUSINESS.contentEquals(packageName)) return;
+ 
+         int boundaryResult = ClaimDataStore.BOUNDARY_NONE;
+-        if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+-            boundaryResult = handleReplyClick(event);
+-            if (boundaryResult == ClaimDataStore.BOUNDARY_RANGE_READY) {
+-                automationPausedUntil = SystemClock.elapsedRealtime() + 1200L;
+-                resetAutomationMotionState();
+-            }
++        if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED
++            && ClaimDataStore.autoStage(this) != ClaimDataStore.AUTO_RUNNING) {
++            captureManualLotClick(event);
+         }
+ 
+         long now = SystemClock.elapsedRealtime();
+-        boolean important = boundaryResult != ClaimDataStore.BOUNDARY_NONE
++        boolean important = event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED
+             || event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+             || event.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED;
+         if (!important && now - lastProcessedElapsed < DEBOUNCE_MS) return;
+@@ -81,6 +80,11 @@
+         if (root == null) return;
+         try {
+             if (hasViewId(root, ID_COMMENTS_LIST, 0)) {
++                boundaryResult = confirmManualBoundaryFromThread(root, now);
++                if (boundaryResult == ClaimDataStore.BOUNDARY_RANGE_READY) {
++                    automationPausedUntil = SystemClock.elapsedRealtime() + 1200L;
++                    resetAutomationMotionState();
++                }
+                 scanThread(root, now);
+             } else {
+                 scanBoard(root);
+@@ -96,25 +100,24 @@
+         }
+     }
+ 
+-    private int handleReplyClick(AccessibilityEvent event) {
++    private void captureManualLotClick(AccessibilityEvent event) {
+         AccessibilityNodeInfo source = event.getSource();
+-        if (source == null) return ClaimDataStore.BOUNDARY_NONE;
+-        boolean replyNode = eventMentionsReply(event);
++        if (source == null) return;
+         AccessibilityNodeInfo cursor = source;
+         try {
+-            for (int depth = 0; cursor != null && depth < 9; depth++) {
++            boolean eventLooksLikeReply = eventMentionsReply(event);
++            for (int depth = 0; cursor != null && depth < 12; depth++) {
+                 String id = safe(cursor.getViewIdResourceName());
+-                if (id.startsWith(ID_REPLIES_PREFIX)) replyNode = true;
+-                if (replyNode) {
+-                    String caption = findFirstTextById(cursor, ID_CAPTION, 0);
+-                    if (caption.length() > 0) {
+-                        int replies = findReplyCount(cursor);
+-                        ClaimParser.LotData lot = ClaimParser.parseLot(caption, replies);
+-                        if (lot != null) {
+-                            ClaimDataStore.upsertLot(this, lot);
+-                            ClaimDataStore.setCurrentLot(this, lot.id);
+-                            return ClaimDataStore.recordBoundaryClick(this, lot.id);
+-                        }
++                boolean replyArea = eventLooksLikeReply || id.startsWith(ID_REPLIES_PREFIX)
++                    || hasViewIdPrefix(cursor, ID_REPLIES_PREFIX, 0);
++                if (replyArea) {
++                    ClaimParser.LotData lot = findLotInSubtree(cursor, 0);
++                    if (lot != null) {
++                        ClaimDataStore.upsertLot(this, lot);
++                        ClaimDataStore.setCurrentLot(this, lot.id);
++                        pendingManualLot = lot.id;
++                        pendingManualLotAt = SystemClock.elapsedRealtime();
++                        return;
+                     }
+                 }
+                 AccessibilityNodeInfo parent = cursor.getParent();
+@@ -126,7 +129,73 @@
+         } finally {
+             if (cursor != null) cursor.recycle();
+         }
+-        return ClaimDataStore.BOUNDARY_NONE;
++    }
++
++    private int confirmManualBoundaryFromThread(AccessibilityNodeInfo root, long now) throws Exception {
++        int stage = ClaimDataStore.autoStage(this);
++        if (stage != ClaimDataStore.AUTO_WAIT_FIRST && stage != ClaimDataStore.AUTO_WAIT_LAST) {
++            return ClaimDataStore.BOUNDARY_NONE;
++        }
++
++        ClaimParser.LotData inferred = findLotInSubtree(root, 0);
++        String lotId = "";
++        if (inferred != null) {
++            ClaimDataStore.upsertLot(this, inferred);
++            lotId = inferred.id;
++        } else if (pendingManualLot.length() > 0 && now - pendingManualLotAt < 10000L) {
++            lotId = pendingManualLot;
++        } else {
++            lotId = ClaimDataStore.currentLot(this);
++        }
++        if (lotId.length() == 0) return ClaimDataStore.BOUNDARY_NONE;
++
++        ClaimDataStore.setCurrentLot(this, lotId);
++        int result = ClaimDataStore.recordBoundaryClick(this, lotId);
++        if (result != ClaimDataStore.BOUNDARY_NONE) {
++            pendingManualLot = "";
++            pendingManualLotAt = 0L;
++        }
++        return result;
++    }
++
++    private ClaimParser.LotData findLotInSubtree(AccessibilityNodeInfo node, int depth) {
++        if (node == null || depth > 28) return null;
++        String id = safe(node.getViewIdResourceName());
++        if (ID_CAPTION.equals(id)) {
++            String caption = safe(node.getText());
++            if (caption.length() == 0) caption = safe(node.getContentDescription());
++            ClaimParser.LotData lot = ClaimParser.parseLot(caption, 0);
++            if (lot != null) return lot;
++        }
++        int childCount = node.getChildCount();
++        for (int i = 0; i < childCount; i++) {
++            AccessibilityNodeInfo child = node.getChild(i);
++            if (child == null) continue;
++            try {
++                ClaimParser.LotData lot = findLotInSubtree(child, depth + 1);
++                if (lot != null) return lot;
++            } finally {
++                child.recycle();
++            }
++        }
++        return null;
++    }
++
++    private boolean hasViewIdPrefix(AccessibilityNodeInfo node, String prefix, int depth) {
++        if (node == null || depth > 18) return false;
++        String id = safe(node.getViewIdResourceName());
++        if (id.startsWith(prefix)) return true;
++        int childCount = node.getChildCount();
++        for (int i = 0; i < childCount; i++) {
++            AccessibilityNodeInfo child = node.getChild(i);
++            if (child == null) continue;
++            try {
++                if (hasViewIdPrefix(child, prefix, depth + 1)) return true;
++            } finally {
++                child.recycle();
++            }
++        }
++        return false;
+     }
+ 
+     private void scanBoard(AccessibilityNodeInfo root) throws Exception {
