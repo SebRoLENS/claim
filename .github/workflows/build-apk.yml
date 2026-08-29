@@ -15,6 +15,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      SIGNING_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,20 +82,63 @@ jobs:
         working-directory: project
         run: ./build.sh
 
-      - name: Stage signing tool
-        shell: bash
-        run: |
-          mkdir -p project/build/signing-tool
-          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" project/build/signing-tool/
-
-      - name: Upload build artifact
+      - name: Upload unsigned build artifact
         uses: actions/upload-artifact@v4
         with:
           name: claimboard-${{ env.VERSION }}-unsigned
-          path: |
-            project/build/outputs/ClaimBoard-Scanner-${{ env.VERSION }}-aligned-unsigned.apk
-            project/build/signing-tool/apksigner.jar
+          path: project/build/outputs/ClaimBoard-Scanner-${{ env.VERSION }}-aligned-unsigned.apk
           if-no-files-found: error
+
+      - name: Sign release APK
+        if: env.SIGNING_KEYSTORE_B64 != '' && env.SIGNING_STORE_PASSWORD != '' && env.SIGNING_KEY_ALIAS != '' && env.SIGNING_KEY_PASSWORD != ''
+        shell: bash
+        run: |
+          mkdir -p project/build/release-signing
+          printf '%s' "$SIGNING_KEYSTORE_B64" | base64 --decode > project/build/release-signing/release.keystore
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks project/build/release-signing/release.keystore \
+            --ks-key-alias "$SIGNING_KEY_ALIAS" \
+            --ks-pass "pass:$SIGNING_STORE_PASSWORD" \
+            --key-pass "pass:$SIGNING_KEY_PASSWORD" \
+            --out "ClaimBoard-Scanner-${VERSION}.apk" \
+            "project/build/outputs/ClaimBoard-Scanner-${VERSION}-aligned-unsigned.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "ClaimBoard-Scanner-${VERSION}.apk"
+          cp "ClaimBoard-Scanner-${VERSION}.apk" ClaimBoard-Scanner-latest.apk
+          sha256sum "ClaimBoard-Scanner-${VERSION}.apk" > "ClaimBoard-Scanner-${VERSION}.apk.sha256"
+
+      - name: Upload signed build artifact
+        if: env.SIGNING_KEYSTORE_B64 != '' && env.SIGNING_STORE_PASSWORD != '' && env.SIGNING_KEY_ALIAS != '' && env.SIGNING_KEY_PASSWORD != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: claimboard-${{ env.VERSION }}-signed
+          path: |
+            ClaimBoard-Scanner-${{ env.VERSION }}.apk
+            ClaimBoard-Scanner-latest.apk
+            ClaimBoard-Scanner-${{ env.VERSION }}.apk.sha256
+          if-no-files-found: error
+
+      - name: Publish signed GitHub Release
+        if: github.ref == 'refs/heads/main' && env.SIGNING_KEYSTORE_B64 != '' && env.SIGNING_STORE_PASSWORD != '' && env.SIGNING_KEY_ALIAS != '' && env.SIGNING_KEY_PASSWORD != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "ClaimBoard-Scanner-${VERSION}.apk" \
+              ClaimBoard-Scanner-latest.apk \
+              "ClaimBoard-Scanner-${VERSION}.apk.sha256" --clobber
+            gh release edit "$TAG" --latest --title "ClaimBoard Scanner ${VERSION}"
+          else
+            gh release create "$TAG" \
+              "ClaimBoard-Scanner-${VERSION}.apk" \
+              ClaimBoard-Scanner-latest.apk \
+              "ClaimBoard-Scanner-${VERSION}.apk.sha256" \
+              --title "ClaimBoard Scanner ${VERSION}" \
+              --notes "Signed ClaimBoard Scanner ${VERSION} release." \
+              --latest
+          fi
 
       - name: Sync README version badge
         if: github.ref == 'refs/heads/main'
