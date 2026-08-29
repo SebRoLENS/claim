@@ -1,10 +1,10 @@
 # ClaimBoard Scanner
 
-[![Current version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FSebRoLENS%2Fclaim%2Fmain%2Fversion-badge.json)](https://github.com/SebRoLENS/claim/actions/workflows/build-apk.yml)
+[![Current version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FSebRoLENS%2Fclaim%2Fmain%2Fversion-badge.json)](https://github.com/SebRoLENS/claim/releases/latest)
 
-[⬇️ Latest build](https://github.com/SebRoLENS/claim/actions/workflows/build-apk.yml)
+[⬇️ Download latest signed APK](https://github.com/SebRoLENS/claim/releases/latest/download/ClaimBoard-Scanner-latest.apk)
 
-> **Current build: 0.3.1.** The version badge is updated automatically after every successful build. The signed GitHub release is published separately; the repository never stores the private signing key.
+Il badge della versione e il pulsante di download sono automatici: ogni nuova build firmata pubblicata come GitHub Release diventa la versione `latest`, senza dover modificare manualmente il README.
 
 Applicazione Android per creare il resoconto degli acquisti effettuati tramite le risposte agli annunci della Bacheca di WhatsApp Business.
 
@@ -42,4 +42,4 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
 
 Il progetto non richiede Gradle né dipendenze di terze parti. Servono JDK 17 e Android SDK Platform 35 con Build Tools 35.0.0. La pipeline GitHub legge automaticamente `android:versionName` dal manifest preparato per la build e usa quella versione per il nome dell’artifact e per il badge del README.
 
-La compilazione pubblica produce un APK allineato non firmato. Per pubblicare automaticamente APK firmati come GitHub Releases, la chiave privata deve essere fornita a GitHub Actions tramite **Actions Secrets** e non deve mai essere salvata nel repository pubblico. Il fingerprint del certificato è documentato in `SIGNING.md`.
+La pipeline produce sia l'APK non firmato sia la release ufficiale firmata. La chiave privata è conservata esclusivamente in **GitHub Actions Secrets**, non nel repository pubblico. Prima della pubblicazione la pipeline verifica il certificato di firma e pubblica sia l'APK con numero di versione sia `ClaimBoard-Scanner-latest.apk`. Il fingerprint del certificato è documentato in `SIGNING.md`.
