@@ -2,9 +2,9 @@
 
 [![Current version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FSebRoLENS%2Fclaim%2Fmain%2Fversion-badge.json)](https://github.com/SebRoLENS/claim/actions/workflows/build-apk.yml)
 
-[⬇️ Download latest signed APK](https://github.com/SebRoLENS/claim/tree/main/release)
+[⬇️ Latest build](https://github.com/SebRoLENS/claim/actions/workflows/build-apk.yml)
 
-Il badge della versione viene aggiornato automaticamente dopo ogni build riuscita, leggendo la versione realmente compilata. Il README quindi non contiene più un numero di versione da aggiornare a mano.
+> **Current build: 0.3.1.** The version badge is updated automatically after every successful build. The signed GitHub release is published separately; the repository never stores the private signing key.
 
 Applicazione Android per creare il resoconto degli acquisti effettuati tramite le risposte agli annunci della Bacheca di WhatsApp Business.
 
@@ -42,4 +42,4 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
 
 Il progetto non richiede Gradle né dipendenze di terze parti. Servono JDK 17 e Android SDK Platform 35 con Build Tools 35.0.0. La pipeline GitHub legge automaticamente `android:versionName` dal manifest preparato per la build e usa quella versione per il nome dell’artifact e per il badge del README.
 
-La compilazione pubblica produce un APK allineato non firmato; la chiave privata di release non viene salvata nel repository pubblico. Gli APK firmati vengono pubblicati nella cartella `release/`. Il fingerprint del certificato è documentato in `SIGNING.md`.
+La compilazione pubblica produce un APK allineato non firmato. Per pubblicare automaticamente APK firmati come GitHub Releases, la chiave privata deve essere fornita a GitHub Actions tramite **Actions Secrets** e non deve mai essere salvata nel repository pubblico. Il fingerprint del certificato è documentato in `SIGNING.md`.
