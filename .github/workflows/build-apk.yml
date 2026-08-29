@@ -12,13 +12,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract source
+      - name: Reconstruct and extract source
+        shell: bash
         run: |
+          cat .ci/source.b64.* > source.b64
+          base64 -d source.b64 > ClaimBoard-Scanner-0.3.0-source.zip
+          unzip -t ClaimBoard-Scanner-0.3.0-source.zip
           mkdir project
           unzip -q ClaimBoard-Scanner-0.3.0-source.zip -d project
           chmod +x project/build.sh project/verify.sh
