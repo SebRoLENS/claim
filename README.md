@@ -1,4 +1,8 @@
-# ClaimBoard Scanner 0.3.0
+# ClaimBoard Scanner
+
+**Current version: 0.3.0**
+
+[⬇️ Download ClaimBoard Scanner 0.3.0 APK](https://github.com/SebRoLENS/claim/actions/runs/33277374984/artifacts/9721917623)
 
 Applicazione Android per creare il resoconto degli acquisti effettuati tramite le risposte agli annunci della Bacheca di WhatsApp Business.
 
@@ -44,4 +48,4 @@ chmod +x build.sh verify.sh
 
 L’APK non firmato viene creato in `build/outputs/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk`. Se vengono fornite tramite variabili d’ambiente le credenziali di firma, `build.sh` produce anche `build/outputs/ClaimBoard-Scanner-0.3.0.apk`.
 
-La build ufficiale firmata è disponibile nella cartella `release/`. Il fingerprint del certificato è documentato in `SIGNING.md`.
+Il fingerprint del certificato è documentato in `SIGNING.md`.
