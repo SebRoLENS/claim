@@ -1,0 +1,49 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extract source
+        run: |
+          mkdir project
+          unzip -q ClaimBoard-Scanner-0.3.0-source.zip -d project
+          chmod +x project/build.sh project/verify.sh
+
+      - name: Ensure Android SDK packages
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build aligned unsigned APK
+        working-directory: project
+        run: ./build.sh
+
+      - name: Stage signing tool
+        shell: bash
+        run: |
+          mkdir -p project/build/signing-tool
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" project/build/signing-tool/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claimboard-0.3.0-unsigned
+          path: |
+            project/build/outputs/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk
+            project/build/signing-tool/apksigner.jar
+          if-no-files-found: error
