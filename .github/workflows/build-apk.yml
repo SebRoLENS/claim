@@ -16,10 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      SIGNING_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      SIGNING_BUNDLE_B64: ${{ secrets.ANDROID_SIGNING_BUNDLE_BASE64 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -90,24 +87,42 @@ jobs:
           if-no-files-found: error
 
       - name: Sign release APK
-        if: env.SIGNING_KEYSTORE_B64 != '' && env.SIGNING_STORE_PASSWORD != '' && env.SIGNING_KEY_ALIAS != '' && env.SIGNING_KEY_PASSWORD != ''
+        if: env.SIGNING_BUNDLE_B64 != ''
         shell: bash
         run: |
-          mkdir -p project/build/release-signing
-          printf '%s' "$SIGNING_KEYSTORE_B64" | base64 --decode > project/build/release-signing/release.keystore
+          set -euo pipefail
+          SIGN_DIR="project/build/release-signing"
+          mkdir -p "$SIGN_DIR"
+          printf '%s' "$SIGNING_BUNDLE_B64" | base64 --decode > "$SIGN_DIR/signing-backup.zip"
+          unzip -q "$SIGN_DIR/signing-backup.zip" -d "$SIGN_DIR"
+
+          README_FILE="$SIGN_DIR/README-signing.txt"
+          KEYSTORE_FILE="$SIGN_DIR/claimboard-calibration.keystore"
+          KEY_ALIAS=$(sed -n 's/^Alias:[[:space:]]*//p' "$README_FILE" | head -n1)
+          KEY_PASSWORD=$(sed -n 's/^Password archivio\/chiave:[[:space:]]*//p' "$README_FILE" | head -n1)
+
+          test -s "$KEYSTORE_FILE"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
-            --ks project/build/release-signing/release.keystore \
-            --ks-key-alias "$SIGNING_KEY_ALIAS" \
-            --ks-pass "pass:$SIGNING_STORE_PASSWORD" \
-            --key-pass "pass:$SIGNING_KEY_PASSWORD" \
+            --ks "$KEYSTORE_FILE" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEY_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
             --out "ClaimBoard-Scanner-${VERSION}.apk" \
             "project/build/outputs/ClaimBoard-Scanner-${VERSION}-aligned-unsigned.apk"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "ClaimBoard-Scanner-${VERSION}.apk"
+
+          VERIFY_OUT=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "ClaimBoard-Scanner-${VERSION}.apk")
+          printf '%s\n' "$VERIFY_OUT"
+          CERT_SHA256=$(printf '%s\n' "$VERIFY_OUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]')
+          test "$CERT_SHA256" = "428b8e0a6dfb9e5e93c67b57cc740e5d6ede7ba81b9b880a7fda6347832f9aa2"
+
           cp "ClaimBoard-Scanner-${VERSION}.apk" ClaimBoard-Scanner-latest.apk
           sha256sum "ClaimBoard-Scanner-${VERSION}.apk" > "ClaimBoard-Scanner-${VERSION}.apk.sha256"
 
       - name: Upload signed build artifact
-        if: env.SIGNING_KEYSTORE_B64 != '' && env.SIGNING_STORE_PASSWORD != '' && env.SIGNING_KEY_ALIAS != '' && env.SIGNING_KEY_PASSWORD != ''
+        if: env.SIGNING_BUNDLE_B64 != ''
         uses: actions/upload-artifact@v4
         with:
           name: claimboard-${{ env.VERSION }}-signed
@@ -118,11 +133,12 @@ jobs:
           if-no-files-found: error
 
       - name: Publish signed GitHub Release
-        if: github.ref == 'refs/heads/main' && env.SIGNING_KEYSTORE_B64 != '' && env.SIGNING_STORE_PASSWORD != '' && env.SIGNING_KEY_ALIAS != '' && env.SIGNING_KEY_PASSWORD != ''
+        if: github.ref == 'refs/heads/main' && env.SIGNING_BUNDLE_B64 != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
