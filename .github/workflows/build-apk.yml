@@ -17,7 +17,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Reconstruct and extract source
+      - name: Reconstruct 0.3.0 source
         shell: bash
         run: |
           cat .ci/source.b64.* > source.b64
@@ -26,6 +26,18 @@ jobs:
           mkdir project
           unzip -q ClaimBoard-Scanner-0.3.0-source.zip -d project
           chmod +x project/build.sh project/verify.sh
+
+      - name: Apply 0.3.1 boundary detection fix
+        shell: bash
+        run: |
+          cd project
+          patch -p0 < ../patches/claimboard-0.3.1.patch
+          sed -i 's/android:versionCode="3"/android:versionCode="4"/' AndroidManifest.xml
+          sed -i 's/android:versionName="0.3.0"/android:versionName="0.3.1"/' AndroidManifest.xml
+          sed -i 's/"appVersion", "0.3.0"/"appVersion", "0.3.1"/' src/it/claimboard/scanner/ClaimDataStore.java
+          sed -i 's/Versione 0.3.0 · scansione automatica/Versione 0.3.1 · scansione automatica/' src/it/claimboard/scanner/MainActivity.java
+          sed -i 's/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk/ClaimBoard-Scanner-0.3.1-aligned-unsigned.apk/g' build.sh
+          sed -i 's/ClaimBoard-Scanner-0.3.0.apk/ClaimBoard-Scanner-0.3.1.apk/g' build.sh
 
       - name: Ensure Android SDK packages
         shell: bash
@@ -59,8 +71,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claimboard-0.3.0-unsigned
+          name: claimboard-0.3.1-unsigned
           path: |
-            project/build/outputs/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk
+            project/build/outputs/ClaimBoard-Scanner-0.3.1-aligned-unsigned.apk
             project/build/signing-tool/apksigner.jar
           if-no-files-found: error
