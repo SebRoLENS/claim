@@ -5,6 +5,13 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: claimboard-build-main
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,17 +24,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Reconstruct 0.3.0 source
+      - name: Reconstruct base source
         shell: bash
         run: |
           cat .ci/source.b64.* > source.b64
-          base64 -d source.b64 > ClaimBoard-Scanner-0.3.0-source.zip
-          unzip -t ClaimBoard-Scanner-0.3.0-source.zip
+          base64 -d source.b64 > ClaimBoard-Scanner-base-source.zip
+          unzip -t ClaimBoard-Scanner-base-source.zip
           mkdir project
-          unzip -q ClaimBoard-Scanner-0.3.0-source.zip -d project
+          unzip -q ClaimBoard-Scanner-base-source.zip -d project
           chmod +x project/build.sh project/verify.sh
 
-      - name: Apply 0.3.1 boundary detection fix
+      - name: Apply current source patches
         shell: bash
         run: |
           cd project
@@ -38,6 +45,14 @@ jobs:
           sed -i 's/Versione 0.3.0 · scansione automatica/Versione 0.3.1 · scansione automatica/' src/it/claimboard/scanner/MainActivity.java
           sed -i 's/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk/ClaimBoard-Scanner-0.3.1-aligned-unsigned.apk/g' build.sh
           sed -i 's/ClaimBoard-Scanner-0.3.0.apk/ClaimBoard-Scanner-0.3.1.apk/g' build.sh
+
+      - name: Detect compiled version
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' project/AndroidManifest.xml | head -n1)
+          test -n "$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Compiling ClaimBoard Scanner $VERSION"
 
       - name: Ensure Android SDK packages
         shell: bash
@@ -71,8 +86,33 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claimboard-0.3.1-unsigned
+          name: claimboard-${{ env.VERSION }}-unsigned
           path: |
-            project/build/outputs/ClaimBoard-Scanner-0.3.1-aligned-unsigned.apk
+            project/build/outputs/ClaimBoard-Scanner-${{ env.VERSION }}-aligned-unsigned.apk
             project/build/signing-tool/apksigner.jar
           if-no-files-found: error
+
+      - name: Sync README version badge
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          version = os.environ['VERSION']
+          data = {
+              'schemaVersion': 1,
+              'label': 'current version',
+              'message': version,
+              'color': 'blue'
+          }
+          with open('version-badge.json', 'w', encoding='utf-8') as f:
+              json.dump(data, f, separators=(',', ':'))
+              f.write('\n')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version-badge.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync current version ${VERSION}"
+            git push origin HEAD:main
+          fi

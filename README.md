@@ -1,10 +1,10 @@
 # ClaimBoard Scanner
 
-**Current version: 0.3.0**
+[![Current version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FSebRoLENS%2Fclaim%2Fmain%2Fversion-badge.json)](https://github.com/SebRoLENS/claim/actions/workflows/build-apk.yml)
 
-[⬇️ Download ClaimBoard Scanner 0.3.0 APK](https://raw.githubusercontent.com/SebRoLENS/claim/main/release/ClaimBoard-Scanner-0.3.0.apk)
+[⬇️ Download latest signed APK](https://github.com/SebRoLENS/claim/tree/main/release)
 
-Signed release APK. SHA-256: `3435592821e5f456afc738854c53e5af8581336b2affda5bb944227c3594f325`
+Il badge della versione viene aggiornato automaticamente dopo ogni build riuscita, leggendo la versione realmente compilata. Il README quindi non contiene più un numero di versione da aggiornare a mano.
 
 Applicazione Android per creare il resoconto degli acquisti effettuati tramite le risposte agli annunci della Bacheca di WhatsApp Business.
 
@@ -40,14 +40,6 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
 
 ## Compilazione
 
-Il progetto non richiede Gradle né dipendenze di terze parti. Servono JDK 17 e Android SDK Platform 35 con Build Tools 35.0.0. La compilazione pubblica produce un APK allineato non firmato; la chiave privata di release non viene mai salvata nel repository.
+Il progetto non richiede Gradle né dipendenze di terze parti. Servono JDK 17 e Android SDK Platform 35 con Build Tools 35.0.0. La pipeline GitHub legge automaticamente `android:versionName` dal manifest preparato per la build e usa quella versione per il nome dell’artifact e per il badge del README.
 
-```bash
-chmod +x build.sh verify.sh
-./build.sh
-./verify.sh
-```
-
-L’APK non firmato viene creato in `build/outputs/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk`. Se vengono fornite tramite variabili d’ambiente le credenziali di firma, `build.sh` produce anche `build/outputs/ClaimBoard-Scanner-0.3.0.apk`.
-
-La build ufficiale firmata è disponibile in `release/ClaimBoard-Scanner-0.3.0.apk`. Il fingerprint del certificato è documentato in `SIGNING.md`.
+La compilazione pubblica produce un APK allineato non firmato; la chiave privata di release non viene salvata nel repository pubblico. Gli APK firmati vengono pubblicati nella cartella `release/`. Il fingerprint del certificato è documentato in `SIGNING.md`.
