@@ -1,0 +1,1362 @@
+diff --git project-031/PRIVACY.md project-032/PRIVACY.md
+index 4474e7b..b90c07a 100644
+--- project-031/PRIVACY.md
++++ project-032/PRIVACY.md
+@@ -1,7 +1,9 @@
+ # Informativa tecnica locale
+ 
+-ClaimBoard Scanner 0.2.0 è privo del permesso Android `INTERNET`.
++ClaimBoard Scanner 0.3.2 è privo del permesso Android `INTERNET`.
+ 
+ Durante una scansione avviata esplicitamente dall’utente, il servizio Accessibilità legge esclusivamente le finestre appartenenti a WhatsApp Business (`com.whatsapp.w4b`). Riconosce didascalie dei lotti e risposte visibili, inclusi nomi WhatsApp, testi e orari necessari a calcolare vincitori e totali.
+ 
+-I dati vengono conservati nell’archivio privato dell’applicazione. Non sono trasmessi automaticamente e lasciano il telefono soltanto quando l’utente usa i comandi di esportazione o condivisione. Il resoconto può essere cancellato dall’app; la scansione termina manualmente o automaticamente dopo due ore.
++I dati e il log diagnostico grezzo vengono conservati nell’archivio privato dell’applicazione. Non sono trasmessi automaticamente e lasciano il telefono soltanto quando l’utente usa i comandi di esportazione o condivisione. Il resoconto e il log possono essere cancellati dall’app; la scansione termina manualmente o automaticamente dopo due ore.
++
++Il comando **Salva log anonimo per GitHub** crea una copia separata con pseudonimi coerenti e senza tabella inversa. Rimuove numeri di telefono, email, URL, handle social, indirizzi IP, percorsi file e date assolute; mantiene lotti, prezzi, ordine delle offerte, interpretazioni del parser, vincitori e passaggi dell’automazione. Poiché i testi della chat sono liberi, l’app ricorda di controllare comunque il file prima di pubblicarlo.
+diff --git project-031/README.md project-032/README.md
+index 8ccf47d..aa961e5 100644
+--- project-031/README.md
++++ project-032/README.md
+@@ -1,4 +1,4 @@
+-# ClaimBoard Scanner 0.3.0
++# ClaimBoard Scanner 0.3.2
+ 
+ Applicazione Android per creare il resoconto degli acquisti effettuati tramite le risposte agli annunci della Bacheca di WhatsApp Business.
+ 
+@@ -23,6 +23,7 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
+ 5. Torna alla Bacheca, raggiungi manualmente l’**ultimo lotto** e apri il suo thread delle risposte.
+ 6. Da questo momento l’app scorre automaticamente i commenti, torna alla Bacheca, apre i lotti intermedi e continua fino al primo estremo.
+ 7. Al termine torna nell’app, controlla le segnalazioni ed esporta il CSV.
++8. Se un dato non è stato interpretato correttamente, usa **Salva log anonimo per GitHub**: il file include chat estratta, decisioni del parser, vincitori e traccia dell’automazione.
+ 
+ ## Privacy e sicurezza
+ 
+@@ -31,6 +32,8 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
+ - scansione attiva solo dopo un comando esplicito;
+ - arresto automatico dopo due ore;
+ - dati conservati nell’archivio privato dell’app e cancellabili dall’utente.
++- log diagnostico grezzo conservato solo nell’archivio privato; l’esportazione per GitHub usa pseudonimi e rimuove gli identificatori comuni;
++- nessuna tabella di corrispondenza tra pseudonimi e partecipanti viene inclusa nel file esportato.
+ 
+ ## Compilazione
+ 
+@@ -42,6 +45,6 @@ chmod +x build.sh verify.sh
+ ./verify.sh
+ ```
+ 
+-L’APK non firmato viene creato in `build/outputs/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk`. Se vengono fornite tramite variabili d’ambiente le credenziali di firma, `build.sh` produce anche `build/outputs/ClaimBoard-Scanner-0.3.0.apk`.
++L’APK non firmato viene creato in `build/outputs/ClaimBoard-Scanner-0.3.2-aligned-unsigned.apk`. Se vengono fornite tramite variabili d’ambiente le credenziali di firma, `build.sh` produce anche `build/outputs/ClaimBoard-Scanner-0.3.2.apk`.
+ 
+ La build ufficiale firmata è disponibile nella cartella `release/`. Il fingerprint del certificato è documentato in `SIGNING.md`.
+diff --git project-031/SIGNING.md project-032/SIGNING.md
+index 9ab2f4c..93c5aaf 100644
+--- project-031/SIGNING.md
++++ project-032/SIGNING.md
+@@ -2,7 +2,7 @@
+ 
+ The private Android signing key is intentionally **not stored in this public repository**.
+ 
+-Release 0.3.0 is signed with the same certificate used for the previous ClaimBoard Scanner builds.
++Official releases, including 0.3.2, are signed with the same certificate used for the previous ClaimBoard Scanner builds.
+ 
+ Certificate SHA-256:
+ 
+diff --git project-031/src/it/claimboard/scanner/ClaimAccessibilityService.java project-032/src/it/claimboard/scanner/ClaimAccessibilityService.java
+index 4ef7ee3..813f24b 100644
+--- project-031/src/it/claimboard/scanner/ClaimAccessibilityService.java
++++ project-032/src/it/claimboard/scanner/ClaimAccessibilityService.java
+@@ -8,6 +8,9 @@ import android.os.SystemClock;
+ import android.view.accessibility.AccessibilityEvent;
+ import android.view.accessibility.AccessibilityNodeInfo;
+ 
++import org.json.JSONArray;
++import org.json.JSONObject;
++
+ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.Comparator;
+@@ -54,6 +57,8 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+     protected void onServiceConnected() {
+         super.onServiceConnected();
+         handler = new Handler(Looper.getMainLooper());
++        DiagnosticLog.event(this, "accessibility_service_connected",
++            "Servizio Accessibilità pronto");
+         kickAutomation(500L);
+     }
+ 
+@@ -91,6 +96,7 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+             }
+         } catch (Exception exception) {
+             ClaimDataStore.setError(this, exception);
++            DiagnosticLog.failureSnapshot(this, "accessibility_event_error", root);
+         } finally {
+             root.recycle();
+         }
+@@ -117,6 +123,8 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+                         ClaimDataStore.setCurrentLot(this, lot.id);
+                         pendingManualLot = lot.id;
+                         pendingManualLotAt = SystemClock.elapsedRealtime();
++                        diagnosticAction("manual_lot_candidate", lot.id, true,
++                            "Click sul contatore delle risposte");
+                         return;
+                     }
+                 }
+@@ -335,6 +343,7 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+         if (lotId.length() == 0) {
+             if (now - lastUnassociatedElapsed > 5000L) {
+                 ClaimDataStore.markUnassociatedThread(this);
++                DiagnosticLog.failureSnapshot(this, "unassociated_thread", root);
+                 lastUnassociatedElapsed = now;
+             }
+             return "";
+@@ -425,6 +434,7 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+                 driveBoard(root);
+             }
+         } catch (Exception exception) {
++            DiagnosticLog.failureSnapshot(this, "automatic_step_error", root);
+             ClaimDataStore.failAutomation(this, "Automazione interrotta: " + safe(exception.getMessage()));
+         } finally {
+             root.recycle();
+@@ -442,6 +452,8 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+             threadPhase = 0;
+             threadFingerprint = "";
+             threadStagnant = 0;
++            diagnosticAction("thread_scan_started", lotId, true,
++                "Acquisizione automatica del thread");
+         }
+ 
+         String fingerprint = scanThread(root, SystemClock.elapsedRealtime());
+@@ -454,25 +466,38 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+ 
+         AccessibilityNodeInfo list = findNodeById(root, ID_COMMENTS_LIST, 0);
+         if (list == null) {
++            DiagnosticLog.failureSnapshot(this, "comments_list_missing", root);
+             ClaimDataStore.failAutomation(this, "Non trovo l’elenco dei commenti del lotto " + lotId);
+             return;
+         }
+         try {
+             if (threadPhase == 0) {
+-                if (threadStagnant > 0
+-                    || !list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) {
++                boolean stagnant = threadStagnant > 0;
++                boolean moved = !stagnant
++                    && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
++                if (stagnant || !moved) {
++                    diagnosticAction("thread_top_reached", lotId, true,
++                        stagnant ? "Contenuto invariato" : "Scorrimento indietro terminato");
+                     threadPhase = 1;
+                     threadFingerprint = "";
+                     threadStagnant = 0;
+                     kickAutomation(220L);
+                 } else {
++                    diagnosticAction("thread_scroll_backward", lotId, true,
++                        "Ricerca dell’inizio del thread");
+                     kickAutomation(ACTION_DELAY_MS);
+                 }
+             } else {
+-                if (threadStagnant > 0
+-                    || !list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) {
++                boolean stagnant = threadStagnant > 0;
++                boolean moved = !stagnant
++                    && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
++                if (stagnant || !moved) {
++                    diagnosticAction("thread_bottom_reached", lotId, true,
++                        stagnant ? "Contenuto invariato" : "Scorrimento avanti terminato");
+                     finishThread(lotId);
+                 } else {
++                    diagnosticAction("thread_scroll_forward", lotId, true,
++                        "Acquisizione delle risposte successive");
+                     kickAutomation(ACTION_DELAY_MS);
+                 }
+             }
+@@ -489,7 +514,9 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+         threadStagnant = 0;
+         boardFingerprint = "";
+         boardStagnant = 0;
+-        performGlobalAction(GLOBAL_ACTION_BACK);
++        boolean backed = performGlobalAction(GLOBAL_ACTION_BACK);
++        diagnosticAction("thread_completed_and_closed", lotId, backed,
++            "Ritorno alla Bacheca");
+         automationPausedUntil = SystemClock.elapsedRealtime() + 650L;
+         kickAutomation(800L);
+     }
+@@ -509,16 +536,23 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+             }
+ 
+             int direction = ClaimDataStore.autoDirection(this);
++            diagnosticBoardState(visible, direction);
+             VisibleLot candidate = nextCandidate(visible, direction);
+             if (candidate != null) {
+                 if (candidate.replyAction == null) {
++                    diagnosticAction("thread_open_unavailable", candidate.lot.id, false,
++                        "Contatore risposte non cliccabile");
++                    DiagnosticLog.failureSnapshot(this, "reply_action_missing", root);
+                     ClaimDataStore.failAutomation(this,
+                         "Non riesco ad aprire le risposte del lotto " + candidate.lot.id);
+                     return;
+                 }
+                 ClaimDataStore.setCurrentLot(this, candidate.lot.id);
+                 boolean clicked = candidate.replyAction.performAction(AccessibilityNodeInfo.ACTION_CLICK);
++                diagnosticAction("thread_open_command", candidate.lot.id, clicked,
++                    "Apertura automatica delle risposte");
+                 if (!clicked) {
++                    DiagnosticLog.failureSnapshot(this, "reply_click_rejected", root);
+                     ClaimDataStore.failAutomation(this,
+                         "WhatsApp non consente di aprire automaticamente il lotto " + candidate.lot.id);
+                     return;
+@@ -544,6 +578,7 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+                 boardFingerprint = fingerprint;
+             }
+             if (boardStagnant >= 2) {
++                DiagnosticLog.failureSnapshot(this, "board_stalled", root);
+                 ClaimDataStore.failAutomation(this,
+                     "Non riesco a raggiungere il primo lotto del range; controlla che la Bacheca sia aperta");
+                 return;
+@@ -551,6 +586,7 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+ 
+             AccessibilityNodeInfo scrollable = findBestScrollable(root, 0, null, 0);
+             if (scrollable == null) {
++                DiagnosticLog.failureSnapshot(this, "board_scrollable_missing", root);
+                 ClaimDataStore.failAutomation(this, "Non trovo la lista scorrevole della Bacheca");
+                 return;
+             }
+@@ -558,7 +594,11 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+                 int action = direction < 0
+                     ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                     : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
+-                if (!scrollable.performAction(action)) {
++                boolean moved = scrollable.performAction(action);
++                diagnosticAction("board_scroll", "", moved,
++                    direction < 0 ? "Verso lotti precedenti" : "Verso lotti successivi");
++                if (!moved) {
++                    DiagnosticLog.failureSnapshot(this, "board_scroll_rejected", root);
+                     ClaimDataStore.failAutomation(this,
+                         "WhatsApp non consente lo scorrimento automatico della Bacheca");
+                     return;
+@@ -709,6 +749,42 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+         return false;
+     }
+ 
++    private void diagnosticAction(String type, String lotId, boolean success, String detail) {
++        try {
++            JSONObject data = new JSONObject();
++            if (lotId != null && lotId.length() > 0) data.put("lotId", lotId);
++            data.put("success", success);
++            data.put("detail", detail == null ? "" : detail);
++            data.put("automationStage", ClaimDataStore.autoStage(this));
++            DiagnosticLog.event(this, type, data);
++        } catch (Exception ignored) {
++            // L’automazione non dipende dal log diagnostico.
++        }
++    }
++
++    private void diagnosticBoardState(List<VisibleLot> visible, int direction) {
++        try {
++            JSONObject data = new JSONObject();
++            data.put("direction", direction < 0 ? "backward" : "forward");
++            data.put("firstLot", ClaimDataStore.autoFirstLot(this));
++            data.put("lastLot", ClaimDataStore.autoLastLot(this));
++            data.put("processedThreads", ClaimDataStore.autoProcessedCount(this));
++            JSONArray values = new JSONArray();
++            for (VisibleLot item : visible) {
++                JSONObject lot = new JSONObject();
++                lot.put("lotId", item.lot.id);
++                lot.put("replyCount", item.lot.replyCount);
++                lot.put("processed", ClaimDataStore.isAutoProcessed(this, item.lot.id));
++                lot.put("replyActionFound", item.replyAction != null);
++                values.put(lot);
++            }
++            data.put("visibleLots", values);
++            DiagnosticLog.event(this, "board_state", data);
++        } catch (Exception ignored) {
++            // L’automazione non dipende dal log diagnostico.
++        }
++    }
++
+     private void resetAutomationMotionState() {
+         automatedThreadLot = "";
+         threadPhase = 0;
+@@ -730,7 +806,8 @@ public final class ClaimAccessibilityService extends AccessibilityService {
+ 
+     @Override
+     public void onInterrupt() {
+-        // Il resoconto resta salvato e può essere ripreso dall'app.
++        DiagnosticLog.event(this, "accessibility_service_interrupted",
++            "Il resoconto resta salvato e può essere ripreso dall’app");
+     }
+ 
+     private static final class VisibleLot {
+diff --git project-031/src/it/claimboard/scanner/ClaimDataStore.java project-032/src/it/claimboard/scanner/ClaimDataStore.java
+index b8e7af2..e48cc54 100644
+--- project-031/src/it/claimboard/scanner/ClaimDataStore.java
++++ project-032/src/it/claimboard/scanner/ClaimDataStore.java
+@@ -83,12 +83,15 @@ final class ClaimDataStore {
+             .putString(KEY_LAST_ERROR, "")
+             .putString(KEY_LAST_UPDATE, isoTimestamp())
+             .apply();
++        DiagnosticLog.start(context, session);
+     }
+ 
+     static void setActive(Context context, boolean active) {
+         SharedPreferences.Editor editor = prefs(context).edit().putBoolean(KEY_ACTIVE, active);
+         if (active) editor.putLong(KEY_STARTED_AT_MS, System.currentTimeMillis());
+         editor.apply();
++        DiagnosticLog.event(context, active ? "scan_resumed" : "scan_stopped",
++            active ? "Scansione riattivata dall’app" : "Scansione fermata dall’app");
+     }
+ 
+     static boolean isActive(Context context) {
+@@ -100,6 +103,8 @@ final class ClaimDataStore {
+                 .putBoolean(KEY_ACTIVE, false)
+                 .putString(KEY_LAST_ERROR, "Scansione fermata automaticamente dopo 2 ore")
+                 .apply();
++            DiagnosticLog.event(context, "scan_timeout",
++                "Scansione fermata automaticamente dopo 2 ore");
+             return false;
+         }
+         return true;
+@@ -134,6 +139,19 @@ final class ClaimDataStore {
+             root.put("updatedAt", isoTimestamp());
+             saveLocked(context, root);
+             markUpdated(context);
++            try {
++                JSONObject diagnostic = new JSONObject();
++                diagnostic.put("id", data.id);
++                diagnostic.put("title", data.title);
++                diagnostic.put("caption", data.caption);
++                diagnostic.put("minCents", data.minCents);
++                diagnostic.put("maxCents", data.maxCents);
++                diagnostic.put("each", data.each);
++                diagnostic.put("replyCount", replyCount);
++                DiagnosticLog.event(context, "lot_extracted", diagnostic);
++            } catch (Exception ignored) {
++                // L’acquisizione del lotto non dipende dal log diagnostico.
++            }
+         }
+         return changed;
+     }
+@@ -150,17 +168,23 @@ final class ClaimDataStore {
+                 .putInt(KEY_AUTO_STAGE, AUTO_WAIT_LAST)
+                 .putString(KEY_LAST_ERROR, "")
+                 .apply();
++            diagnosticBoundary(context, "first", lotId);
+             return BOUNDARY_FIRST_SET;
+         }
+         if (stage == AUTO_WAIT_LAST) {
+             String first = preferences.getString(KEY_AUTO_FIRST_LOT, "");
+-            if (lotId.equals(first)) return BOUNDARY_NONE;
++            if (lotId.equals(first)) {
++                DiagnosticLog.event(context, "boundary_ignored",
++                    "Il secondo estremo coincide con il primo lotto");
++                return BOUNDARY_NONE;
++            }
+             preferences.edit()
+                 .putString(KEY_AUTO_LAST_LOT, lotId)
+                 .putStringSet(KEY_AUTO_PROCESSED, new HashSet<String>())
+                 .putInt(KEY_AUTO_STAGE, AUTO_RUNNING)
+                 .putString(KEY_LAST_ERROR, "")
+                 .apply();
++            diagnosticBoundary(context, "last", lotId);
+             return BOUNDARY_RANGE_READY;
+         }
+         return BOUNDARY_NONE;
+@@ -170,6 +194,17 @@ final class ClaimDataStore {
+         return prefs(context).getInt(KEY_AUTO_STAGE, AUTO_WAIT_FIRST);
+     }
+ 
++    private static void diagnosticBoundary(Context context, String boundary, String lotId) {
++        try {
++            JSONObject data = new JSONObject();
++            data.put("boundary", boundary == null ? "" : boundary);
++            data.put("lotId", lotId == null ? "" : lotId);
++            DiagnosticLog.event(context, "boundary_recorded", data);
++        } catch (Exception ignored) {
++            // La selezione degli estremi non dipende dal log diagnostico.
++        }
++    }
++
+     static String autoFirstLot(Context context) {
+         String value = prefs(context).getString(KEY_AUTO_FIRST_LOT, "");
+         return value == null ? "" : value;
+@@ -203,8 +238,9 @@ final class ClaimDataStore {
+         Set<String> existing = preferences.getStringSet(KEY_AUTO_PROCESSED, null);
+         Set<String> copy = existing == null
+             ? new HashSet<String>() : new HashSet<String>(existing);
+-        copy.add(lotId);
++        boolean added = copy.add(lotId);
+         preferences.edit().putStringSet(KEY_AUTO_PROCESSED, copy).apply();
++        if (added) DiagnosticLog.event(context, "thread_completed", lotId);
+     }
+ 
+     static boolean isAutoProcessed(Context context, String lotId) {
+@@ -224,6 +260,15 @@ final class ClaimDataStore {
+             .putString(KEY_LAST_ERROR, "")
+             .putString(KEY_LAST_UPDATE, isoTimestamp())
+             .apply();
++        try {
++            JSONObject diagnostic = new JSONObject();
++            diagnostic.put("firstLot", autoFirstLot(context));
++            diagnostic.put("lastLot", autoLastLot(context));
++            diagnostic.put("processedThreads", autoProcessedCount(context));
++            DiagnosticLog.event(context, "automation_completed", diagnostic);
++        } catch (Exception ignored) {
++            // Best effort.
++        }
+     }
+ 
+     static void failAutomation(Context context, String message) {
+@@ -233,6 +278,7 @@ final class ClaimDataStore {
+             .putBoolean(KEY_ACTIVE, false)
+             .putString(KEY_LAST_ERROR, message)
+             .apply();
++        DiagnosticLog.event(context, "automation_failed", message);
+     }
+ 
+     static void setCurrentLot(Context context, String lotId) {
+@@ -270,6 +316,7 @@ final class ClaimDataStore {
+         JSONArray comments = lot.optJSONArray("comments");
+         if (comments == null) comments = new JSONArray();
+         Set<String> existing = new LinkedHashSet<String>();
++        JSONArray addedItems = new JSONArray();
+         long nextSequence = root.optLong("sequence", 0L);
+         for (int i = 0; i < comments.length(); i++) {
+             JSONObject item = comments.optJSONObject(i);
+@@ -291,6 +338,7 @@ final class ClaimDataStore {
+             item.put("deleted", value.deleted);
+             item.put("sequence", ++nextSequence);
+             comments.put(item);
++            addedItems.put(item);
+             added++;
+         }
+         if (added > 0) {
+@@ -301,6 +349,14 @@ final class ClaimDataStore {
+             root.put("updatedAt", isoTimestamp());
+             saveLocked(context, root);
+             markUpdated(context);
++            try {
++                JSONObject diagnostic = new JSONObject();
++                diagnostic.put("lotId", lotId);
++                diagnostic.put("comments", addedItems);
++                DiagnosticLog.event(context, "comments_extracted", diagnostic);
++            } catch (Exception ignored) {
++                // L’acquisizione dei commenti non dipende dal log diagnostico.
++            }
+         }
+         return added;
+     }
+@@ -311,15 +367,19 @@ final class ClaimDataStore {
+             .putInt(KEY_UNASSOCIATED, preferences.getInt(KEY_UNASSOCIATED, 0) + 1)
+             .putString(KEY_LAST_ERROR, "Un thread non è stato associato: riaprilo dal contatore delle risposte")
+             .apply();
++        DiagnosticLog.event(context, "thread_unassociated",
++            "Nessun lotto associato al thread visibile");
+     }
+ 
+     static void setError(Context context, Exception exception) {
+         String message = exception.getMessage();
+         if (message == null || message.length() == 0) message = exception.getClass().getSimpleName();
+         prefs(context).edit().putString(KEY_LAST_ERROR, message).apply();
++        DiagnosticLog.error(context, "operational_store", exception);
+     }
+ 
+     static synchronized void clear(Context context) throws Exception {
++        DiagnosticLog.clear(context);
+         File destination = file(context);
+         if (destination.exists() && !destination.delete()) {
+             throw new IllegalStateException("Impossibile cancellare il resoconto locale");
+@@ -449,6 +509,323 @@ final class ClaimDataStore {
+         }
+     }
+ 
++    static String diagnosticExportFileName(Context context) {
++        return "claimboard_log_anonimo_github.json";
++    }
++
++    static synchronized void writeAnonymizedDiagnostic(Context context, Uri uri) throws Exception {
++        JSONObject source = loadLocked(context);
++        JSONArray events = DiagnosticLog.readEvents(context);
++        List<String> participantNames = new ArrayList<String>();
++        collectParticipantNames(source, participantNames);
++        collectDiagnosticNames(events, participantNames);
++        Map<String, String> aliases = DiagnosticAnonymizer.buildAliases(participantNames);
++        Map<String, String> dayAliases = new LinkedHashMap<String, String>();
++
++        JSONObject output = new JSONObject();
++        output.put("format", "ClaimBoard GitHub diagnostic");
++        output.put("schema", 1);
++        output.put("appVersion", DiagnosticLog.appVersion(context));
++        output.put("anonymized", true);
++        JSONObject privacy = new JSONObject();
++        privacy.put("participants", "pseudonimi coerenti Cliente_001, Cliente_002, …");
++        privacy.put("operator", "Tu è sostituito con Operatore");
++        privacy.put("removed",
++            "telefoni, email, URL, handle social, IP, percorsi file, date assolute e chiavi interne");
++        privacy.put("reverseAliasMapIncluded", false);
++        privacy.put("rawLogRemainsPrivateOnDevice", true);
++        privacy.put("reviewBeforePublishing", true);
++        privacy.put("warning",
++            "Controlla comunque i testi liberi prima di pubblicare il file in un issue GitHub.");
++        output.put("privacy", privacy);
++
++        JSONObject range = new JSONObject();
++        range.put("firstLot", autoFirstLot(context));
++        range.put("lastLot", autoLastLot(context));
++        output.put("range", range);
++
++        SharedPreferences preferences = prefs(context);
++        JSONObject automation = new JSONObject();
++        automation.put("stage", autoStageLabel(autoStage(context)));
++        automation.put("active", preferences.getBoolean(KEY_ACTIVE, false));
++        automation.put("currentLot", currentLot(context));
++        automation.put("processedThreads", autoProcessedCount(context));
++        automation.put("lastError", DiagnosticAnonymizer.sanitizeText(
++            preferences.getString(KEY_LAST_ERROR, ""), aliases));
++        output.put("automationState", automation);
++
++        Report report = buildReport(context);
++        JSONObject summary = new JSONObject();
++        summary.put("lots", report.lotCount);
++        summary.put("validOffers", report.validOfferCount);
++        summary.put("assignedLots", report.assignedLotCount);
++        summary.put("customers", report.customers.size());
++        summary.put("totalCents", report.totalCents);
++        summary.put("lotsToReview", report.reviewLots.size());
++        output.put("summary", summary);
++
++        JSONArray lotsOutput = new JSONArray();
++        JSONObject lots = source.optJSONObject("lots");
++        List<String> lotIds = lots == null ? new ArrayList<String>() : jsonKeys(lots);
++        Collections.sort(lotIds, new Comparator<String>() {
++            @Override
++            public int compare(String left, String right) {
++                return compareLotIds(left, right);
++            }
++        });
++        for (String lotId : lotIds) {
++            JSONObject lot = lots.optJSONObject(lotId);
++            if (lot != null) {
++                lotsOutput.put(anonymizedLot(context, lot, aliases, dayAliases));
++            }
++        }
++        output.put("extractedChatAndParserOutput", lotsOutput);
++
++        JSONArray buyers = new JSONArray();
++        for (CustomerResult customer : report.customers) {
++            JSONObject buyer = new JSONObject();
++            buyer.put("participant", DiagnosticAnonymizer.aliasFor(customer.name, aliases));
++            buyer.put("totalCents", customer.totalCents);
++            JSONArray purchases = new JSONArray();
++            for (Purchase purchase : customer.purchases) {
++                JSONObject item = new JSONObject();
++                item.put("lotId", purchase.lotId);
++                item.put("title", DiagnosticAnonymizer.sanitizeLotText(
++                    purchase.title, aliases, purchase.lotId));
++                item.put("cents", purchase.cents);
++                item.put("method", purchase.method);
++                item.put("time", purchase.time);
++                item.put("note", DiagnosticAnonymizer.sanitizeLotText(
++                    purchase.note, aliases, purchase.lotId));
++                purchases.put(item);
++            }
++            buyer.put("purchases", purchases);
++            buyers.put(buyer);
++        }
++        output.put("buyersOutput", buyers);
++        output.put("automationTrace", sanitizeDiagnosticValue(events, aliases));
++
++        ContentResolver resolver = context.getContentResolver();
++        OutputStream raw = resolver.openOutputStream(uri, "wt");
++        if (raw == null) throw new IllegalStateException("Destinazione non disponibile");
++        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
++            raw, StandardCharsets.UTF_8))) {
++            writer.write(output.toString(2));
++            writer.newLine();
++        }
++        DiagnosticLog.event(context, "anonymized_diagnostic_exported",
++            "Esportazione completata");
++    }
++
++    private static JSONObject anonymizedLot(Context context, JSONObject lot,
++                                             Map<String, String> aliases,
++                                             Map<String, String> dayAliases) throws Exception {
++        JSONObject result = new JSONObject();
++        String lotId = lot.optString("id", "");
++        int minCents = lot.optInt("minCents", 0);
++        int maxCents = lot.optInt("maxCents", 0);
++        result.put("lotId", lotId);
++        result.put("title", DiagnosticAnonymizer.sanitizeLotText(
++            lot.optString("title", ""), aliases, lotId));
++        result.put("caption", DiagnosticAnonymizer.sanitizeLotText(
++            lot.optString("caption", ""), aliases, lotId));
++        result.put("minCents", minCents);
++        result.put("maxCents", maxCents);
++        result.put("each", lot.optBoolean("each", false));
++        result.put("declaredReplyCount", lot.optInt("replyCount", 0));
++        result.put("automationProcessed", ClaimDataStore.isAutoProcessed(context, lotId));
++
++        JSONArray commentsOutput = new JSONArray();
++        JSONArray comments = lot.optJSONArray("comments");
++        if (comments != null) {
++            for (int i = 0; i < comments.length(); i++) {
++                JSONObject comment = comments.optJSONObject(i);
++                if (comment == null) continue;
++                String name = comment.optString("name", "");
++                String text = comment.optString("text", "");
++                boolean deleted = comment.optBoolean("deleted", false);
++                JSONObject item = new JSONObject();
++                item.put("order", comment.optLong("sequence", i + 1L));
++                item.put("participant", DiagnosticAnonymizer.aliasFor(name, aliases));
++                item.put("text", DiagnosticAnonymizer.sanitizeLotText(text, aliases, lotId));
++                item.put("time", comment.optString("time", ""));
++                String day = comment.optString("date", "");
++                if (day.length() > 0) item.put("day", dayAlias(day, dayAliases));
++                item.put("deleted", deleted);
++
++                JSONObject interpretation = new JSONObject();
++                if (deleted) {
++                    interpretation.put("status", "deleted");
++                } else if (name.length() == 0 || name.equalsIgnoreCase("Tu")) {
++                    interpretation.put("status", "ignored");
++                    interpretation.put("reason", name.length() == 0
++                        ? "partecipante non riconosciuto" : "messaggio dell’operatore");
++                } else {
++                    ClaimParser.OfferDecision decision = ClaimParser.parseOffer(
++                        text, minCents, maxCents);
++                    interpretation.put("status", decision.valid ? "valid"
++                        : (decision.review ? "review" : "ignored"));
++                    if (decision.valid) {
++                        interpretation.put("cents", decision.cents);
++                        interpretation.put("method", decision.method);
++                    }
++                    if (decision.note.length() > 0) {
++                        interpretation.put("note",
++                            DiagnosticAnonymizer.sanitizeText(decision.note, aliases));
++                    }
++                }
++                item.put("parserInterpretation", interpretation);
++                commentsOutput.put(item);
++            }
++        }
++        result.put("capturedReplyCount", commentsOutput.length());
++        result.put("comments", commentsOutput);
++
++        LotResult evaluated = evaluateLot(lot);
++        if (evaluated.winner != null) {
++            JSONObject winner = new JSONObject();
++            winner.put("participant",
++                DiagnosticAnonymizer.aliasFor(evaluated.winner.name, aliases));
++            winner.put("cents", evaluated.winner.cents);
++            winner.put("method", evaluated.winner.method);
++            winner.put("time", evaluated.winner.time);
++            winner.put("winningRule", "highest offer; earliest response on tie");
++            result.put("winner", winner);
++        }
++        result.put("needsReview", evaluated.needsReview);
++        if (evaluated.reviewNote.length() > 0) {
++            result.put("reviewNote",
++                DiagnosticAnonymizer.sanitizeLotText(evaluated.reviewNote, aliases, lotId));
++        }
++        return result;
++    }
++
++    private static String dayAlias(String raw, Map<String, String> aliases) {
++        String known = aliases.get(raw);
++        if (known != null) return known;
++        String created = "Giorno_" + (aliases.size() + 1);
++        aliases.put(raw, created);
++        return created;
++    }
++
++    private static String autoStageLabel(int stage) {
++        if (stage == AUTO_WAIT_FIRST) return "wait_first";
++        if (stage == AUTO_WAIT_LAST) return "wait_last";
++        if (stage == AUTO_RUNNING) return "running";
++        if (stage == AUTO_DONE) return "done";
++        if (stage == AUTO_ERROR) return "error";
++        return "unknown";
++    }
++
++    private static void collectParticipantNames(JSONObject root, List<String> output) {
++        JSONObject lots = root.optJSONObject("lots");
++        if (lots == null) return;
++        for (String lotId : jsonKeys(lots)) {
++            JSONObject lot = lots.optJSONObject(lotId);
++            JSONArray comments = lot == null ? null : lot.optJSONArray("comments");
++            if (comments == null) continue;
++            for (int i = 0; i < comments.length(); i++) {
++                JSONObject comment = comments.optJSONObject(i);
++                if (comment == null) continue;
++                String name = comment.optString("name", "").trim();
++                if (name.length() > 0) output.add(name);
++            }
++        }
++    }
++
++    private static void collectDiagnosticNames(Object value, List<String> output) {
++        if (value instanceof JSONArray) {
++            JSONArray values = (JSONArray) value;
++            for (int i = 0; i < values.length(); i++) {
++                collectDiagnosticNames(values.opt(i), output);
++            }
++            return;
++        }
++        if (!(value instanceof JSONObject)) return;
++        JSONObject object = (JSONObject) value;
++        String viewId = object.optString("id", "").toLowerCase(Locale.US);
++        for (String key : jsonKeys(object)) {
++            Object child = object.opt(key);
++            if (("name".equalsIgnoreCase(key) || "participant".equalsIgnoreCase(key))
++                && child instanceof String && ((String) child).trim().length() > 0) {
++                output.add(((String) child).trim());
++            } else if ("text".equalsIgnoreCase(key) && child instanceof String
++                && isIdentityView(viewId)) {
++                output.add(((String) child).trim());
++            }
++            collectDiagnosticNames(child, output);
++        }
++    }
++
++    private static Object sanitizeDiagnosticValue(Object value, Map<String, String> aliases)
++        throws Exception {
++        if (value instanceof JSONArray) {
++            JSONArray source = (JSONArray) value;
++            JSONArray result = new JSONArray();
++            for (int i = 0; i < source.length(); i++) {
++                result.put(sanitizeDiagnosticValue(source.opt(i), aliases));
++            }
++            return result;
++        }
++        if (value instanceof JSONObject) {
++            JSONObject source = (JSONObject) value;
++            JSONObject result = new JSONObject();
++            String viewId = source.optString("id", "").toLowerCase(Locale.US);
++            for (String key : jsonKeys(source)) {
++                if (isPrivateDiagnosticKey(key)) continue;
++                Object child = source.opt(key);
++                if (child instanceof String && isStructuredLotId(key, (String) child)) {
++                    result.put(key, child);
++                } else if (("name".equalsIgnoreCase(key)
++                    || "participant".equalsIgnoreCase(key)) && child instanceof String) {
++                    result.put(key, DiagnosticAnonymizer.aliasFor((String) child, aliases));
++                } else if ("text".equalsIgnoreCase(key) && child instanceof String
++                    && isIdentityView(viewId)) {
++                    result.put(key, DiagnosticAnonymizer.aliasFor((String) child, aliases));
++                } else if ("description".equalsIgnoreCase(key) && child instanceof String
++                    && isProfileImageView(viewId)) {
++                    result.put(key, "[PROFILE_IMAGE]");
++                } else {
++                    result.put(key, sanitizeDiagnosticValue(child, aliases));
++                }
++            }
++            return result;
++        }
++        if (value instanceof String) {
++            return DiagnosticAnonymizer.sanitizeText((String) value, aliases);
++        }
++        return value == null ? JSONObject.NULL : value;
++    }
++
++    private static boolean isStructuredLotId(String key, String value) {
++        String normalized = key == null ? "" : key.toLowerCase(Locale.US);
++        boolean lotKey = normalized.equals("id") || normalized.equals("lotid")
++            || normalized.equals("firstlot") || normalized.equals("lastlot")
++            || normalized.equals("currentlot");
++        return lotKey && value != null && value.matches("[0-9]{1,18}");
++    }
++
++    private static boolean isPrivateDiagnosticKey(String key) {
++        String value = key == null ? "" : key.toLowerCase(Locale.US);
++        return value.equals("session") || value.equals("key") || value.equals("capturedat")
++            || value.equals("startedat") || value.equals("updatedat") || value.equals("seenat")
++            || value.equals("threadseenat") || value.equals("date");
++    }
++
++    private static boolean isIdentityView(String viewId) {
++        String value = viewId == null ? "" : viewId.toLowerCase(Locale.US);
++        return value.contains("contact_name") || value.contains("participant_name")
++            || value.contains("name_in_group") || value.contains("comment_header")
++            || value.contains("msg_from") || value.contains("sender_name")
++            || value.contains("author_name") || value.contains("profile_name");
++    }
++
++    private static boolean isProfileImageView(String viewId) {
++        String value = viewId == null ? "" : viewId.toLowerCase(Locale.US);
++        return value.contains("profile_pic") || value.contains("profile_photo")
++            || value.contains("contact_photo") || value.contains("profile_picture");
++    }
++
+     static String shareText(Report report) {
+         StringBuilder value = new StringBuilder();
+         value.append("RESOCONTO CLAIMBOARD\n");
+diff --git project-032/src/it/claimboard/scanner/DiagnosticAnonymizer.java project-032/src/it/claimboard/scanner/DiagnosticAnonymizer.java
+new file mode 100644
+index 0000000..6ed2fb2
+--- /dev/null
++++ project-032/src/it/claimboard/scanner/DiagnosticAnonymizer.java
+@@ -0,0 +1,125 @@
++package it.claimboard.scanner;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.Comparator;
++import java.util.LinkedHashMap;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.Set;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
++
++/** Funzioni pure usate per creare un log condivisibile senza dati identificativi. */
++final class DiagnosticAnonymizer {
++    private static final Pattern URL = Pattern.compile("(?i)\\b(?:https?://|www\\.)\\S+");
++    private static final Pattern EMAIL = Pattern.compile(
++        "(?i)(?<![\\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}(?![\\w.-])");
++    private static final Pattern HANDLE = Pattern.compile(
++        "(?i)(?<![\\p{L}\\d._])@[A-Z0-9_][A-Z0-9_.-]{2,}");
++    private static final Pattern IP_ADDRESS = Pattern.compile(
++        "(?<!\\d)(?:\\d{1,3}\\.){3}\\d{1,3}(?!\\d)");
++    private static final Pattern UNIX_PATH = Pattern.compile(
++        "(?i)(?<![\\p{L}\\d])(?:/[A-Z0-9._ -]+){2,}(?:/[A-Z0-9._ -]+)?");
++    private static final Pattern WINDOWS_PATH = Pattern.compile(
++        "(?i)\\b[A-Z]:\\\\(?:[^\\s\\\\]+\\\\)+[^\\s\\\\]*");
++    private static final Pattern PHONE = Pattern.compile(
++        "(?<![\\p{L}\\d])\\+?\\d(?:[\\s()./-]*\\d){7,}(?![\\p{L}\\d])");
++    private static final Pattern LONG_NUMBER = Pattern.compile("(?<!\\d)\\d{7,}(?!\\d)");
++
++    private DiagnosticAnonymizer() {}
++
++    static Map<String, String> buildAliases(List<String> names) {
++        Set<String> unique = new LinkedHashSet<String>();
++        if (names != null) {
++            for (String value : names) {
++                String clean = value == null ? "" : value.trim();
++                if (clean.length() == 0 || isOperator(clean)) continue;
++                boolean present = false;
++                for (String known : unique) {
++                    if (known.equalsIgnoreCase(clean)) {
++                        present = true;
++                        break;
++                    }
++                }
++                if (!present) unique.add(clean);
++            }
++        }
++        List<String> sorted = new ArrayList<String>(unique);
++        Collections.sort(sorted, new Comparator<String>() {
++            @Override
++            public int compare(String left, String right) {
++                int value = left.compareToIgnoreCase(right);
++                return value != 0 ? value : left.compareTo(right);
++            }
++        });
++        Map<String, String> result = new LinkedHashMap<String, String>();
++        int index = 1;
++        for (String name : sorted) {
++            result.put(name, String.format(Locale.US, "Cliente_%03d", index++));
++        }
++        return result;
++    }
++
++    static String aliasFor(String name, Map<String, String> aliases) {
++        String clean = name == null ? "" : name.trim();
++        if (clean.length() == 0) return "Sconosciuto";
++        if (isOperator(clean)) return "Operatore";
++        if (aliases != null) {
++            for (Map.Entry<String, String> entry : aliases.entrySet()) {
++                if (entry.getKey().equalsIgnoreCase(clean)) return entry.getValue();
++            }
++            String created = String.format(Locale.US, "Cliente_%03d", aliases.size() + 1);
++            aliases.put(clean, created);
++            return created;
++        }
++        return "Cliente_sconosciuto";
++    }
++
++    static String sanitizeText(String value, Map<String, String> aliases) {
++        if (value == null || value.length() == 0) return "";
++        String result = value;
++        List<Map.Entry<String, String>> entries = new ArrayList<Map.Entry<String, String>>();
++        if (aliases != null) entries.addAll(aliases.entrySet());
++        Collections.sort(entries, new Comparator<Map.Entry<String, String>>() {
++            @Override
++            public int compare(Map.Entry<String, String> left, Map.Entry<String, String> right) {
++                return right.getKey().length() - left.getKey().length();
++            }
++        });
++        for (Map.Entry<String, String> entry : entries) {
++            String raw = entry.getKey();
++            if (raw.length() == 0) continue;
++            String expression = raw.length() <= 2
++                ? "(?iu)(?<![\\p{L}\\d])" + Pattern.quote(raw) + "(?![\\p{L}\\d])"
++                : "(?iu)" + Pattern.quote(raw);
++            result = Pattern.compile(expression).matcher(result)
++                .replaceAll(Matcher.quoteReplacement(entry.getValue()));
++        }
++        result = Pattern.compile("(?iu)(?<![\\p{L}\\d])Tu(?![\\p{L}\\d])")
++            .matcher(result).replaceAll("Operatore");
++        result = URL.matcher(result).replaceAll("[URL]");
++        result = EMAIL.matcher(result).replaceAll("[EMAIL]");
++        result = HANDLE.matcher(result).replaceAll("[HANDLE]");
++        result = IP_ADDRESS.matcher(result).replaceAll("[IP]");
++        result = WINDOWS_PATH.matcher(result).replaceAll("[PATH]");
++        result = UNIX_PATH.matcher(result).replaceAll("[PATH]");
++        result = PHONE.matcher(result).replaceAll("[PHONE]");
++        result = LONG_NUMBER.matcher(result).replaceAll("[NUMBER]");
++        return result;
++    }
++
++    static String sanitizeLotText(String value, Map<String, String> aliases, String lotId) {
++        if (value == null) return "";
++        if (lotId == null || lotId.length() == 0) return sanitizeText(value, aliases);
++        String marker = "__CLAIMBOARD_LOT_IDENTIFIER__";
++        String prepared = value.replace(lotId, marker);
++        return sanitizeText(prepared, aliases).replace(marker, lotId);
++    }
++
++    private static boolean isOperator(String value) {
++        return "tu".equals(value.trim().toLowerCase(Locale.ITALY));
++    }
++}
+diff --git project-032/src/it/claimboard/scanner/DiagnosticLog.java project-032/src/it/claimboard/scanner/DiagnosticLog.java
+new file mode 100644
+index 0000000..d3ebb21
+--- /dev/null
++++ project-032/src/it/claimboard/scanner/DiagnosticLog.java
+@@ -0,0 +1,247 @@
++package it.claimboard.scanner;
++
++import android.content.Context;
++import android.graphics.Rect;
++import android.view.accessibility.AccessibilityNodeInfo;
++
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++import java.io.BufferedReader;
++import java.io.BufferedWriter;
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.FileOutputStream;
++import java.io.InputStreamReader;
++import java.io.OutputStreamWriter;
++import java.nio.charset.StandardCharsets;
++import java.text.SimpleDateFormat;
++import java.util.Date;
++import java.util.Locale;
++import java.util.TimeZone;
++
++/** Log diagnostico privato: ogni chiamata è best effort e non blocca il resoconto. */
++final class DiagnosticLog {
++    private static final String FILE_NAME = "claimboard_diagnostic.jsonl";
++    private static final String KEY_SNAPSHOTS = "diagnostic_snapshots";
++    private static final String KEY_EVENT_COUNT = "diagnostic_event_count";
++    private static final long MAX_BYTES = 12L * 1024L * 1024L;
++    private static final int MAX_SNAPSHOTS = 8;
++    private static final int MAX_SNAPSHOT_NODES = 350;
++
++    private DiagnosticLog() {}
++
++    static File file(Context context) {
++        return new File(context.getFilesDir(), FILE_NAME);
++    }
++
++    static synchronized void start(Context context, String session) {
++        File destination = file(context);
++        try {
++            if (destination.exists()) {
++                try (FileOutputStream ignored = new FileOutputStream(destination, false)) {
++                    // Tronca il vecchio log prima di iniziare il nuovo evento.
++                }
++            }
++            ClaimDataStore.prefs(context).edit()
++                .putInt(KEY_SNAPSHOTS, 0)
++                .putInt(KEY_EVENT_COUNT, 0)
++                .apply();
++            JSONObject data = new JSONObject();
++            data.put("schema", 1);
++            data.put("appVersion", appVersion(context));
++            data.put("session", session == null ? "" : session);
++            append(context, "session_started", data);
++        } catch (Exception ignored) {
++            // Il resoconto operativo deve continuare anche se il log non è disponibile.
++        }
++    }
++
++    static synchronized void event(Context context, String type, String message) {
++        try {
++            JSONObject data = new JSONObject();
++            data.put("message", message == null ? "" : message);
++            append(context, type, data);
++        } catch (Exception ignored) {
++            // Best effort.
++        }
++    }
++
++    static synchronized void event(Context context, String type, JSONObject data) {
++        try {
++            append(context, type, data == null ? new JSONObject() : data);
++        } catch (Exception ignored) {
++            // Best effort.
++        }
++    }
++
++    static synchronized void error(Context context, String area, Exception exception) {
++        try {
++            JSONObject data = new JSONObject();
++            data.put("area", area == null ? "" : area);
++            data.put("exception", exception == null ? "" : exception.getClass().getSimpleName());
++            data.put("message", exception == null || exception.getMessage() == null
++                ? "" : exception.getMessage());
++            append(context, "error", data);
++        } catch (Exception ignored) {
++            // Best effort.
++        }
++    }
++
++    static synchronized void failureSnapshot(Context context, String label,
++                                             AccessibilityNodeInfo root) {
++        if (root == null) return;
++        int count = ClaimDataStore.prefs(context).getInt(KEY_SNAPSHOTS, 0);
++        if (count >= MAX_SNAPSHOTS || file(context).length() >= MAX_BYTES) return;
++        try {
++            JSONArray nodes = new JSONArray();
++            SnapshotCounter counter = new SnapshotCounter();
++            collectNodes(root, nodes, counter, -1, 0);
++            JSONObject data = new JSONObject();
++            data.put("label", label == null ? "" : label);
++            data.put("nodeCount", nodes.length());
++            data.put("truncated", counter.nextIndex >= MAX_SNAPSHOT_NODES);
++            data.put("nodes", nodes);
++            append(context, "accessibility_failure_snapshot", data);
++            ClaimDataStore.prefs(context).edit().putInt(KEY_SNAPSHOTS, count + 1).apply();
++        } catch (Exception exception) {
++            error(context, "failure_snapshot", exception);
++        }
++    }
++
++    static synchronized JSONArray readEvents(Context context) {
++        JSONArray result = new JSONArray();
++        File source = file(context);
++        if (!source.exists()) return result;
++        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
++            new FileInputStream(source), StandardCharsets.UTF_8))) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                if (line.trim().length() == 0) continue;
++                try {
++                    result.put(new JSONObject(line));
++                } catch (Exception ignored) {
++                    JSONObject damaged = new JSONObject();
++                    damaged.put("type", "damaged_log_line");
++                    result.put(damaged);
++                }
++            }
++        } catch (Exception exception) {
++            try {
++                JSONObject error = new JSONObject();
++                error.put("type", "log_read_error");
++                error.put("message", exception.getClass().getSimpleName());
++                result.put(error);
++            } catch (Exception ignored) {
++                // JSONArray resta comunque valido.
++            }
++        }
++        if (source.length() >= MAX_BYTES) {
++            try {
++                JSONObject limit = new JSONObject();
++                limit.put("type", "diagnostic_log_limit_reached");
++                result.put(limit);
++            } catch (Exception ignored) {
++                // Best effort.
++            }
++        }
++        return result;
++    }
++
++    static synchronized void clear(Context context) throws Exception {
++        File destination = file(context);
++        if (destination.exists()) {
++            try (FileOutputStream ignored = new FileOutputStream(destination, false)) {
++                // Prima azzera il contenuto, poi prova a rimuovere il file vuoto.
++            }
++            if (!destination.delete()) {
++                throw new IllegalStateException("Impossibile cancellare il log diagnostico locale");
++            }
++        }
++        ClaimDataStore.prefs(context).edit()
++            .remove(KEY_SNAPSHOTS)
++            .remove(KEY_EVENT_COUNT)
++            .apply();
++    }
++
++    static String appVersion(Context context) {
++        try {
++            String value = context.getPackageManager()
++                .getPackageInfo(context.getPackageName(), 0).versionName;
++            return value == null ? "unknown" : value;
++        } catch (Exception ignored) {
++            return "unknown";
++        }
++    }
++
++    private static void append(Context context, String type, JSONObject data) throws Exception {
++        File destination = file(context);
++        if (destination.length() >= MAX_BYTES) return;
++        JSONObject line = new JSONObject();
++        line.put("index", countLinesHint(context));
++        line.put("capturedAt", isoTimestamp());
++        line.put("type", type == null ? "event" : type);
++        line.put("data", data);
++        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
++            new FileOutputStream(destination, true), StandardCharsets.UTF_8))) {
++            writer.write(line.toString());
++            writer.newLine();
++        }
++    }
++
++    private static int countLinesHint(Context context) {
++        int value = ClaimDataStore.prefs(context).getInt(KEY_EVENT_COUNT, 0) + 1;
++        ClaimDataStore.prefs(context).edit().putInt(KEY_EVENT_COUNT, value).apply();
++        return value;
++    }
++
++    private static void collectNodes(AccessibilityNodeInfo node, JSONArray result,
++                                     SnapshotCounter counter, int parent, int depth) throws Exception {
++        if (node == null || depth > 45 || counter.nextIndex >= MAX_SNAPSHOT_NODES) return;
++        int index = counter.nextIndex++;
++        Rect bounds = new Rect();
++        node.getBoundsInScreen(bounds);
++        JSONObject item = new JSONObject();
++        item.put("i", index);
++        item.put("p", parent);
++        item.put("d", depth);
++        String id = safe(node.getViewIdResourceName());
++        String className = safe(node.getClassName());
++        String text = safe(node.getText());
++        String description = safe(node.getContentDescription());
++        if (id.length() > 0) item.put("id", id);
++        if (className.length() > 0) item.put("class", className);
++        if (text.length() > 0) item.put("text", text);
++        if (description.length() > 0) item.put("description", description);
++        item.put("bounds", bounds.left + "," + bounds.top + ","
++            + bounds.right + "," + bounds.bottom);
++        if (node.isClickable()) item.put("clickable", true);
++        if (node.isScrollable()) item.put("scrollable", true);
++        result.put(item);
++
++        int childCount = node.getChildCount();
++        for (int i = 0; i < childCount && counter.nextIndex < MAX_SNAPSHOT_NODES; i++) {
++            AccessibilityNodeInfo child = node.getChild(i);
++            if (child == null) continue;
++            try {
++                collectNodes(child, result, counter, index, depth + 1);
++            } finally {
++                child.recycle();
++            }
++        }
++    }
++
++    private static String isoTimestamp() {
++        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
++        format.setTimeZone(TimeZone.getTimeZone("UTC"));
++        return format.format(new Date());
++    }
++
++    private static String safe(CharSequence value) {
++        return value == null ? "" : value.toString();
++    }
++
++    private static final class SnapshotCounter {
++        int nextIndex;
++    }
++}
+diff --git project-031/src/it/claimboard/scanner/MainActivity.java project-032/src/it/claimboard/scanner/MainActivity.java
+index 1215cc3..9985db8 100644
+--- project-031/src/it/claimboard/scanner/MainActivity.java
++++ project-032/src/it/claimboard/scanner/MainActivity.java
+@@ -26,6 +26,7 @@ import java.io.File;
+ 
+ public final class MainActivity extends Activity {
+     private static final int REQUEST_EXPORT_CSV = 401;
++    private static final int REQUEST_EXPORT_DIAGNOSTIC = 402;
+     private static final String WHATSAPP_BUSINESS = "com.whatsapp.w4b";
+ 
+     private TextView accessStatus;
+@@ -37,6 +38,7 @@ public final class MainActivity extends Activity {
+     private Button stopButton;
+     private Button exportButton;
+     private Button shareButton;
++    private Button diagnosticButton;
+     private ClaimDataStore.Report currentReport;
+ 
+     @Override
+@@ -180,6 +182,17 @@ public final class MainActivity extends Activity {
+         });
+         export.addView(shareButton, marginParams(0, 8, 0, 0));
+ 
++        export.addView(note("Se qualcosa viene letto male, salva il log diagnostico: contiene chat estratta, decisioni del parser e passaggi automatici. Nomi e altri identificatori vengono anonimizzati."),
++            marginParams(0, 12, 0, 0));
++        diagnosticButton = button("Salva log anonimo per GitHub", false);
++        diagnosticButton.setOnClickListener(new View.OnClickListener() {
++            @Override
++            public void onClick(View view) {
++                confirmDiagnosticExport();
++            }
++        });
++        export.addView(diagnosticButton, marginParams(0, 8, 0, 0));
++
+         Button clearButton = button("Cancella resoconto locale", false);
+         clearButton.setOnClickListener(new View.OnClickListener() {
+             @Override
+@@ -244,6 +257,7 @@ public final class MainActivity extends Activity {
+         stopButton.setEnabled(active);
+         exportButton.setEnabled(currentReport.assignedLotCount > 0 || !currentReport.reviewLots.isEmpty());
+         shareButton.setEnabled(currentReport.assignedLotCount > 0);
++        diagnosticButton.setEnabled(ClaimDataStore.file(this).exists());
+     }
+ 
+     private void renderCustomers(ClaimDataStore.Report report) {
+@@ -366,17 +380,44 @@ public final class MainActivity extends Activity {
+     @Override
+     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+         super.onActivityResult(requestCode, resultCode, data);
+-        if (requestCode != REQUEST_EXPORT_CSV || resultCode != RESULT_OK || data == null) return;
++        if (resultCode != RESULT_OK || data == null) return;
+         Uri uri = data.getData();
+         if (uri == null) return;
+         try {
+-            ClaimDataStore.writeCsv(this, uri, ClaimDataStore.buildReport(this));
+-            toast("CSV salvato");
++            if (requestCode == REQUEST_EXPORT_CSV) {
++                ClaimDataStore.writeCsv(this, uri, ClaimDataStore.buildReport(this));
++                toast("CSV salvato");
++            } else if (requestCode == REQUEST_EXPORT_DIAGNOSTIC) {
++                ClaimDataStore.writeAnonymizedDiagnostic(this, uri);
++                toast("Log anonimo salvato: controllalo prima di pubblicarlo");
++            }
+         } catch (Exception exception) {
+             showError(exception);
+         }
+     }
+ 
++    private void confirmDiagnosticExport() {
++        new AlertDialog.Builder(this)
++            .setTitle("Creare il log anonimo?")
++            .setMessage("Il file sostituisce i partecipanti con Cliente_001, Cliente_002 e rimuove telefoni, email, link e altri identificatori comuni. Controlla comunque i testi liberi prima di allegarlo a GitHub.")
++            .setNegativeButton("Annulla", null)
++            .setPositiveButton("Crea log", new DialogInterface.OnClickListener() {
++                @Override
++                public void onClick(DialogInterface dialog, int which) {
++                    exportDiagnostic();
++                }
++            })
++            .show();
++    }
++
++    private void exportDiagnostic() {
++        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
++        intent.addCategory(Intent.CATEGORY_OPENABLE);
++        intent.setType("application/json");
++        intent.putExtra(Intent.EXTRA_TITLE, ClaimDataStore.diagnosticExportFileName(this));
++        startActivityForResult(intent, REQUEST_EXPORT_DIAGNOSTIC);
++    }
++
+     private void shareReport() {
+         ClaimDataStore.Report report = ClaimDataStore.buildReport(this);
+         Intent intent = new Intent(Intent.ACTION_SEND);
+diff --git project-032/tests/it/claimboard/scanner/DiagnosticAnonymizerTest.java project-032/tests/it/claimboard/scanner/DiagnosticAnonymizerTest.java
+new file mode 100644
+index 0000000..1180ab0
+--- /dev/null
++++ project-032/tests/it/claimboard/scanner/DiagnosticAnonymizerTest.java
+@@ -0,0 +1,57 @@
++package it.claimboard.scanner;
++
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++
++public final class DiagnosticAnonymizerTest {
++    public static void main(String[] args) {
++        List<String> names = new ArrayList<String>();
++        names.add("Mario Rossi");
++        names.add("Giulia");
++        names.add("mario rossi");
++        names.add("+39 351 717 1630");
++        names.add("Tu");
++        Map<String, String> aliases = DiagnosticAnonymizer.buildAliases(names);
++
++        require(aliases.size() == 3, "alias unici e case-insensitive");
++        require("Cliente_003".equals(DiagnosticAnonymizer.aliasFor("Mario Rossi", aliases)),
++            "alias stabile per nome");
++        require("Cliente_001".equals(
++            DiagnosticAnonymizer.aliasFor("+39 351 717 1630", aliases)),
++            "numero WhatsApp trattato come partecipante");
++        require("Operatore".equals(DiagnosticAnonymizer.aliasFor("Tu", aliases)),
++            "operatore separato");
++
++        String raw = "Mario Rossi, +39 333 123 4567, mario@example.it, "
++            + "https://example.it/ordine, @mario_cards, 192.168.1.20, "
++            + "/data/user/0/app/file e C:\\Users\\Mario\\debug.txt";
++        String clean = DiagnosticAnonymizer.sanitizeText(raw, aliases);
++        require(clean.contains("Cliente_003"), "nome sostituito");
++        require(clean.contains("[PHONE]"), "telefono rimosso");
++        require(clean.contains("[EMAIL]"), "email rimossa");
++        require(clean.contains("[URL]"), "url rimosso");
++        require(clean.contains("[HANDLE]") && clean.contains("[IP]"),
++            "handle e indirizzo IP rimossi");
++        require(clean.contains("[PATH]"), "percorsi file rimossi");
++        require(!clean.contains("Mario") && !clean.contains("333"),
++            "nessun identificatore residuo");
++
++        String business = DiagnosticAnonymizer.sanitizeText(
++            "Lotto 094, Claim min 18.00 €, Claim max 20.00 €", aliases);
++        require(business.contains("094") && business.contains("18.00")
++            && business.contains("20.00"), "lotto breve e prezzi conservati");
++        require(DiagnosticAnonymizer.sanitizeText("3517171630", aliases).contains("[PHONE]"),
++            "numero lungo libero rimosso");
++        String longLot = "015038127180";
++        String caption = DiagnosticAnonymizer.sanitizeLotText(
++            "Lotto " + longLot + " Claim min 18 Claim max 20", aliases, longLot);
++        require(caption.contains(longLot), "identificativo lotto lungo conservato nel contesto lotto");
++
++        System.out.println("DiagnosticAnonymizerTest: controlli superati");
++    }
++
++    private static void require(boolean condition, String message) {
++        if (!condition) throw new AssertionError(message);
++    }
++}
+diff --git project-031/verify.sh project-032/verify.sh
+index 99c1019..35ffcc1 100755
+--- project-031/verify.sh
++++ project-032/verify.sh
+@@ -2,7 +2,7 @@
+ set -euo pipefail
+ 
+ project_dir="$(cd "$(dirname "$0")" && pwd)"
+-apk="${1:-$project_dir/build/outputs/ClaimBoard-Scanner-0.2.0.apk}"
++apk="${1:-$project_dir/build/outputs/ClaimBoard-Scanner-0.3.2.apk}"
+ 
+ test -f "$apk"
+ apksigner verify --verbose --print-certs "$apk"
+@@ -17,8 +17,8 @@ fi
+ 
+ badging="$(aapt dump badging "$apk")"
+ grep -q "package: name='it.claimboard.scanner'" <<<"$badging"
+-grep -q "versionCode='2'" <<<"$badging"
+-grep -q "versionName='0.2.0'" <<<"$badging"
++grep -q "versionCode='5'" <<<"$badging"
++grep -q "versionName='0.3.2'" <<<"$badging"
+ grep -q "targetSdkVersion:'35'" <<<"$badging"
+ grep -q "provides-component:'accessibility'" <<<"$badging"
+ 
+@@ -27,4 +27,4 @@ grep -q 'com.whatsapp.w4b' <<<"$config"
+ grep -q 'canRetrieveWindowContent' <<<"$config"
+ 
+ sha256sum "$apk"
+-echo "Verifica ClaimBoard Scanner 0.2.0 completata."
++echo "Verifica ClaimBoard Scanner 0.3.2 completata."

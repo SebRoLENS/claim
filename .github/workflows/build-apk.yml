@@ -47,6 +47,30 @@ jobs:
           sed -i 's/Versione 0.3.0 · scansione automatica/Versione 0.3.1 · scansione automatica/' src/it/claimboard/scanner/MainActivity.java
           sed -i 's/ClaimBoard-Scanner-0.3.0-aligned-unsigned.apk/ClaimBoard-Scanner-0.3.1-aligned-unsigned.apk/g' build.sh
           sed -i 's/ClaimBoard-Scanner-0.3.0.apk/ClaimBoard-Scanner-0.3.1.apk/g' build.sh
+          patch -p1 < ../patches/claimboard-0.3.2.patch
+          sed -i 's/android:versionCode="4"/android:versionCode="5"/' AndroidManifest.xml
+          sed -i 's/android:versionName="0.3.1"/android:versionName="0.3.2"/' AndroidManifest.xml
+          sed -i 's/"appVersion", "0.3.1"/"appVersion", "0.3.2"/' src/it/claimboard/scanner/ClaimDataStore.java
+          sed -i 's/Versione 0.3.1 · scansione automatica/Versione 0.3.2 · scansione automatica/' src/it/claimboard/scanner/MainActivity.java
+          sed -i 's/ClaimBoard-Scanner-0.3.1-aligned-unsigned.apk/ClaimBoard-Scanner-0.3.2-aligned-unsigned.apk/g' build.sh
+          sed -i 's/ClaimBoard-Scanner-0.3.1.apk/ClaimBoard-Scanner-0.3.2.apk/g' build.sh
+          grep -q 'pendingManualLot' src/it/claimboard/scanner/ClaimAccessibilityService.java
+          grep -q 'confirmManualBoundaryFromThread' src/it/claimboard/scanner/ClaimAccessibilityService.java
+          test -f src/it/claimboard/scanner/DiagnosticLog.java
+          test -f src/it/claimboard/scanner/DiagnosticAnonymizer.java
+
+      - name: Run parser and anonymization tests
+        shell: bash
+        run: |
+          mkdir -p project/build/test-classes
+          javac -encoding UTF-8 -source 8 -target 8 \
+            -d project/build/test-classes \
+            project/src/it/claimboard/scanner/ClaimParser.java \
+            project/src/it/claimboard/scanner/DiagnosticAnonymizer.java \
+            project/tests/it/claimboard/scanner/ClaimParserTest.java \
+            project/tests/it/claimboard/scanner/DiagnosticAnonymizerTest.java
+          java -cp project/build/test-classes it.claimboard.scanner.ClaimParserTest
+          java -cp project/build/test-classes it.claimboard.scanner.DiagnosticAnonymizerTest
 
       - name: Detect compiled version
         shell: bash

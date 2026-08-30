@@ -35,6 +35,15 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
 5. Torna alla Bacheca, raggiungi manualmente l’**ultimo lotto** e apri il suo thread delle risposte.
 6. Da questo momento l’app scorre automaticamente i commenti, torna alla Bacheca, apre i lotti intermedi e continua fino al primo estremo.
 7. Al termine torna nell’app, controlla le segnalazioni ed esporta il CSV.
+8. Se un dato non è stato interpretato correttamente, usa **Salva log anonimo per GitHub** e allega il JSON a un [nuovo issue](https://github.com/SebRoLENS/claim/issues/new) descrivendo il risultato atteso.
+
+## Log diagnostico anonimo
+
+Il file esportato contiene la chat acquisita, l’interpretazione di ogni risposta, i vincitori e i totali calcolati, la sequenza delle azioni automatiche e — in caso di errore — una fotografia testuale dell’albero Accessibilità. Questo permette di riprodurre e correggere un’estrazione errata senza richiedere screenshot o dati grezzi.
+
+I partecipanti diventano `Cliente_001`, `Cliente_002`, … e `Tu` diventa `Operatore`. Telefoni, email, URL, handle social, indirizzi IP, percorsi file e date assolute vengono rimossi; gli identificativi dei lotti, i prezzi e l’ordine delle offerte restano disponibili per la diagnosi. Il file non contiene la tabella inversa degli pseudonimi.
+
+Il log grezzo rimane nell’archivio privato dell’app e non viene caricato automaticamente. Poiché i messaggi sono testo libero, controlla comunque il JSON prima di pubblicarlo su GitHub.
 
 ## Privacy e sicurezza
 
@@ -43,6 +52,7 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
 - scansione attiva solo dopo un comando esplicito;
 - arresto automatico dopo due ore;
 - dati conservati nell’archivio privato dell’app e cancellabili dall’utente.
+- esportazione diagnostica esplicita e anonimizzata, senza mappa inversa dei partecipanti.
 
 ## Compilazione
 

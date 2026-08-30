@@ -2,7 +2,7 @@
 
 The private Android signing key is intentionally **not stored in this public repository**.
 
-Release 0.3.0 is signed with the same certificate used for the previous ClaimBoard Scanner builds.
+Official releases, including 0.3.2, are signed with the same certificate used for the previous ClaimBoard Scanner builds.
 
 Certificate SHA-256:
 
