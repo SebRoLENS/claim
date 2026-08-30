@@ -1,6 +1,12 @@
-# ClaimBoard Scanner
+<p align="center">
+  <img src="readme-icon.svg" width="112" alt="ClaimBoard Scanner icon">
+</p>
 
-[![Current version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FSebRoLENS%2Fclaim%2Fmain%2Fversion-badge.json)](https://github.com/SebRoLENS/claim/releases/latest)
+<h1 align="center">ClaimBoard Scanner</h1>
+
+<p align="center">
+  <a href="https://github.com/SebRoLENS/claim/releases/latest"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FSebRoLENS%2Fclaim%2Fmain%2Fversion-badge.json" alt="Current version"></a>
+</p>
 
 [⬇️ Download latest signed APK](https://github.com/SebRoLENS/claim/releases/latest/download/ClaimBoard-Scanner-latest.apk)
 
@@ -40,6 +46,6 @@ Per ogni lotto vince l’offerta valida più alta; a parità viene scelta la pri
 
 ## Compilazione
 
-Il progetto non richiede Gradle né dipendenze di terze parti. Servono JDK 17 e Android SDK Platform 35 con Build Tools 35.0.0. La pipeline GitHub legge automaticamente `android:versionName` dal manifest preparato per la build e usa quella versione per il nome dell’artifact e per il badge del README.
+Il progetto non richiede Gradle né dipendenze di terze parti. Servono JDK 17 e Android SDK Platform 35 con Build Tools 35.0.0. La pipeline GitHub legge automaticamente `android:versionName` dal manifest preparato per la build e usa quella versione per il nome dell'artifact e per il badge del README.
 
 La pipeline produce sia l'APK non firmato sia la release ufficiale firmata. La chiave privata è conservata esclusivamente in **GitHub Actions Secrets**, non nel repository pubblico. Prima della pubblicazione la pipeline verifica il certificato di firma e pubblica sia l'APK con numero di versione sia `ClaimBoard-Scanner-latest.apk`. Il fingerprint del certificato è documentato in `SIGNING.md`.
