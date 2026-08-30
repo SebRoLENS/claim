@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">ClaimBoard Scanner icon</title>
+  <rect width="128" height="128" rx="28" fill="#2563eb"/>
+  <rect x="27" y="28" width="74" height="72" rx="15" fill="#fff"/>
+  <path d="M43 50h42M43 64h29M43 78h19" stroke="#2563eb" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="83" cy="80" r="17" fill="#16a34a"/>
+  <path d="m75 80 6 6 11-13" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
